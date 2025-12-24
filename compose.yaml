@@ -1,0 +1,23 @@
+services:
+  # Service for the GUI
+  gui:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./src:/app/src  # Live Reload: Code changes update instantly
+      - ./data:/app/data
+    environment:
+      - PYTHONPATH=/app
+    command: streamlit run src/web.py --server.address=0.0.0.0
+
+  # Service for the CLI
+  cli:
+    build: .
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data
+    environment:
+      - PYTHONPATH=/app
+    entrypoint: ["python", "src/cli.py"]
+
