@@ -133,3 +133,135 @@ def unpivot_data(
         value_name=value_name,
     )
 
+
+def apply_lookup(
+    df: pl.DataFrame,
+    lookup_df: pl.DataFrame,
+    source_column: str,
+    code_column: str,
+    label_column: str,
+) -> pl.DataFrame:
+    """
+    Replace codes with labels using a lookup table.
+
+    Joins the main DataFrame with a lookup DataFrame to replace code values
+    with their corresponding labels. The original column is replaced with
+    the label values while keeping the original column name.
+
+    Args:
+        df: Source DataFrame containing codes to be replaced.
+        lookup_df: Lookup DataFrame containing code-to-label mappings.
+        source_column: Column name in df containing codes to replace.
+        code_column: Column name in lookup_df containing the codes.
+        label_column: Column name in lookup_df containing the labels.
+
+    Returns:
+        A DataFrame with codes replaced by labels in the source column.
+
+    Raises:
+        ValueError: If any of the specified columns do not exist.
+    """
+    if source_column not in df.columns:
+        raise ValueError(f"Source column '{source_column}' not found in data")
+    if code_column not in lookup_df.columns:
+        raise ValueError(f"Code column '{code_column}' not found in lookup")
+    if label_column not in lookup_df.columns:
+        raise ValueError(f"Label column '{label_column}' not found in lookup")
+    lookup_subset = lookup_df.select([code_column, label_column]).unique()
+    result = df.join(
+        lookup_subset,
+        left_on=source_column,
+        right_on=code_column,
+        how="left",
+    )
+    result = result.with_columns(
+        pl.when(pl.col(label_column).is_not_null())
+        .then(pl.col(label_column))
+        .otherwise(pl.col(source_column))
+        .alias(source_column)
+    )
+    columns_to_drop = [label_column]
+    if code_column != source_column and code_column in result.columns:
+        columns_to_drop.append(code_column)
+    return result.drop(columns_to_drop)
+
+
+def filter_data(
+    df: pl.DataFrame,
+    column: str,
+    values: list[str],
+) -> pl.DataFrame:
+    """
+    Filter DataFrame rows by column values.
+
+    Keeps only rows where the specified column's value is in the given set
+    of allowed values.
+
+    Args:
+        df: Source DataFrame to filter.
+        column: Column name to filter on.
+        values: List of values to keep.
+
+    Returns:
+        A filtered DataFrame containing only matching rows.
+
+    Raises:
+        ValueError: If the column does not exist in the DataFrame.
+    """
+    if column not in df.columns:
+        raise ValueError(f"Column '{column}' not found in data")
+    return df.filter(pl.col(column).cast(pl.Utf8).is_in(values))
+
+
+def exclude_values(
+    df: pl.DataFrame,
+    column: str,
+    values: list[str],
+) -> pl.DataFrame:
+    """
+    Exclude rows with specific column values from DataFrame.
+
+    Removes rows where the specified column's value is in the given set
+    of values to exclude.
+
+    Args:
+        df: Source DataFrame to filter.
+        column: Column name to filter on.
+        values: List of values to exclude.
+
+    Returns:
+        A filtered DataFrame with matching rows removed.
+
+    Raises:
+        ValueError: If the column does not exist in the DataFrame.
+    """
+    if column not in df.columns:
+        raise ValueError(f"Column '{column}' not found in data")
+    return df.filter(~pl.col(column).cast(pl.Utf8).is_in(values))
+
+
+def drop_columns(
+    df: pl.DataFrame,
+    columns: list[str],
+) -> pl.DataFrame:
+    """
+    Drop specified columns from DataFrame.
+
+    Removes entire columns from the DataFrame, useful for ignoring
+    columns like "Total" or metadata columns when visualizing.
+
+    Args:
+        df: Source DataFrame.
+        columns: List of column names to drop.
+
+    Returns:
+        A DataFrame with specified columns removed.
+
+    Raises:
+        ValueError: If any column does not exist in the DataFrame.
+    """
+    missing = [col for col in columns if col not in df.columns]
+    if missing:
+        raise ValueError(f"Columns not found: {', '.join(missing)}")
+    return df.drop(columns)
+

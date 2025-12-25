@@ -25,6 +25,7 @@ class PlotlyRenderer:
         *,
         title: str | None = None,
         color: str | None = None,
+        facet_column: str | None = None,
         **kwargs: object,
     ) -> FigureResult:
         """
@@ -37,12 +38,18 @@ class PlotlyRenderer:
             y: Column name(s) for y-axis.
             title: Optional chart title.
             color: Optional column name for color grouping.
+            facet_column: Optional column for creating interactive dropdown
+                selector to switch between facet values.
             **kwargs: Additional Plotly-specific options.
 
         Returns:
             A Plotly Figure object.
         """
         pandas_df = df.to_pandas()
+        if facet_column is not None:
+            return self._create_faceted_chart(
+                pandas_df, chart_type, x, y, title, color, facet_column, **kwargs
+            )
         chart_builders = {
             ChartType.BAR: self._create_bar,
             ChartType.LINE: self._create_line,
@@ -116,6 +123,175 @@ class PlotlyRenderer:
         """Create a pie chart."""
         y_col = y[0] if isinstance(y, list) else y
         return px.pie(df, names=x, values=y_col, title=title, **kwargs)
+
+    def _create_faceted_chart(
+        self,
+        df: object,
+        chart_type: ChartType,
+        x: str,
+        y: str | list[str],
+        title: str | None,
+        color: str | None,
+        facet_column: str,
+        **kwargs: object,
+    ) -> go.Figure:
+        """
+        Create an interactive chart with dropdown selector for facet values.
+
+        Generates separate traces for each unique value in facet_column and
+        adds a dropdown menu to switch between them.
+        """
+        import pandas as pd
+        pandas_df = df if isinstance(df, pd.DataFrame) else df
+        facet_values = sorted(pandas_df[facet_column].unique().tolist())
+        if len(facet_values) == 0:
+            raise ValueError(f"No values found in facet column '{facet_column}'")
+        fig = go.Figure()
+        y_col = y[0] if isinstance(y, list) else y
+        for idx, facet_value in enumerate(facet_values):
+            facet_df = pandas_df[pandas_df[facet_column] == facet_value]
+            is_visible = idx == 0
+            self._add_facet_traces(
+                fig, facet_df, chart_type, x, y_col, color, facet_value, is_visible
+            )
+        dropdown_buttons = self._create_dropdown_buttons(
+            pandas_df, facet_values, facet_column, chart_type, color
+        )
+        chart_title = title or f"Chart by {facet_column}"
+        fig.update_layout(
+            title=f"{chart_title}: {facet_values[0]}",
+            updatemenus=[{
+                "active": 0,
+                "buttons": dropdown_buttons,
+                "direction": "down",
+                "showactive": True,
+                "x": 0.0,
+                "xanchor": "left",
+                "y": 1.15,
+                "yanchor": "top",
+            }],
+        )
+        return fig
+
+    def _add_facet_traces(
+        self,
+        fig: go.Figure,
+        df: object,
+        chart_type: ChartType,
+        x: str,
+        y: str,
+        color: str | None,
+        facet_value: str,
+        is_visible: bool,
+    ) -> None:
+        """Add traces for a single facet value to the figure."""
+        import pandas as pd
+        pandas_df = df if isinstance(df, pd.DataFrame) else df
+        if color is not None and color in pandas_df.columns:
+            color_values = sorted(pandas_df[color].unique().tolist())
+            for color_val in color_values:
+                color_df = pandas_df[pandas_df[color] == color_val]
+                self._add_single_trace(
+                    fig, color_df, chart_type, x, y, is_visible,
+                    name=str(color_val), facet_value=facet_value
+                )
+        else:
+            self._add_single_trace(
+                fig, pandas_df, chart_type, x, y, is_visible,
+                name=str(facet_value), facet_value=facet_value
+            )
+
+    def _add_single_trace(
+        self,
+        fig: go.Figure,
+        df: object,
+        chart_type: ChartType,
+        x: str,
+        y: str,
+        is_visible: bool,
+        name: str,
+        facet_value: str,
+    ) -> None:
+        """Add a single trace to the figure based on chart type."""
+        import pandas as pd
+        pandas_df = df if isinstance(df, pd.DataFrame) else df
+        trace_meta = {"facet_value": facet_value}
+        if chart_type == ChartType.BAR:
+            fig.add_trace(go.Bar(
+                x=pandas_df[x].tolist(),
+                y=pandas_df[y].tolist(),
+                name=name,
+                visible=is_visible,
+                meta=trace_meta,
+            ))
+        elif chart_type == ChartType.LINE:
+            fig.add_trace(go.Scatter(
+                x=pandas_df[x].tolist(),
+                y=pandas_df[y].tolist(),
+                mode="lines+markers",
+                name=name,
+                visible=is_visible,
+                meta=trace_meta,
+            ))
+        elif chart_type == ChartType.SCATTER:
+            fig.add_trace(go.Scatter(
+                x=pandas_df[x].tolist(),
+                y=pandas_df[y].tolist(),
+                mode="markers",
+                name=name,
+                visible=is_visible,
+                meta=trace_meta,
+            ))
+        elif chart_type == ChartType.HISTOGRAM:
+            fig.add_trace(go.Histogram(
+                x=pandas_df[x].tolist(),
+                name=name,
+                visible=is_visible,
+                meta=trace_meta,
+            ))
+        elif chart_type == ChartType.PIE:
+            fig.add_trace(go.Pie(
+                labels=pandas_df[x].tolist(),
+                values=pandas_df[y].tolist(),
+                name=name,
+                visible=is_visible,
+                meta=trace_meta,
+            ))
+
+    def _create_dropdown_buttons(
+        self,
+        df: object,
+        facet_values: list[str],
+        facet_column: str,
+        chart_type: ChartType,
+        color: str | None,
+    ) -> list[dict]:
+        """Create dropdown button definitions for facet selector."""
+        import pandas as pd
+        pandas_df = df if isinstance(df, pd.DataFrame) else df
+        buttons = []
+        has_color = color is not None and color in pandas_df.columns
+        if has_color:
+            num_color_values = len(pandas_df[color].unique())
+        else:
+            num_color_values = 1
+        traces_per_facet = num_color_values
+        total_traces = len(facet_values) * traces_per_facet
+        for idx, facet_value in enumerate(facet_values):
+            visibility = [False] * total_traces
+            start_idx = idx * traces_per_facet
+            end_idx = start_idx + traces_per_facet
+            for i in range(start_idx, end_idx):
+                visibility[i] = True
+            buttons.append({
+                "label": str(facet_value),
+                "method": "update",
+                "args": [
+                    {"visible": visibility},
+                    {"title": f"Chart by {facet_column}: {facet_value}"}
+                ],
+            })
+        return buttons
 
     def create_network(
         self,

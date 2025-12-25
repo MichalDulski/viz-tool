@@ -7,7 +7,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from src.engine import compare_datasets, load_data, unpivot_data
+from src.engine import apply_lookup, compare_datasets, drop_columns, exclude_values, filter_data, load_data, unpivot_data
 from src.graphs import ChartType, ExportFormat, get_renderer, list_renderers
 
 app = typer.Typer(no_args_is_help=True)
@@ -95,6 +95,30 @@ def chart(
     value_name: str = typer.Option(
         "value", "--value-name", help="Name for the unpivoted value column"
     ),
+    lookup: str = typer.Option(
+        None, "--lookup", help="Path to lookup/mapping CSV file"
+    ),
+    lookup_column: str = typer.Option(
+        None, "--lookup-column", help="Column in main data to apply lookup to"
+    ),
+    lookup_code_col: str = typer.Option(
+        None, "--lookup-code-col", help="Code column name in lookup file"
+    ),
+    lookup_label_col: str = typer.Option(
+        None, "--lookup-label-col", help="Label column name in lookup file"
+    ),
+    filter_expr: list[str] = typer.Option(
+        None, "--filter", help="Filter expression as COL:VAL1,VAL2,... (repeatable)"
+    ),
+    exclude_expr: list[str] = typer.Option(
+        None, "--exclude", help="Exclude expression as COL:VAL1,VAL2,... (repeatable)"
+    ),
+    drop_cols: str = typer.Option(
+        None, "--drop-columns", help="Comma-separated column names to ignore/drop"
+    ),
+    facet: str = typer.Option(
+        None, "--facet", help="Column for creating dropdown selector"
+    ),
 ) -> None:
     """
     Create a statistical chart from data file.
@@ -111,6 +135,27 @@ def chart(
         # Mode 2: Specify value column start index, rest of columns become values
         viz chart wide.csv --type line --value-start 4 \\
             --var-name Year --value-name Population --x Year --y Population --color Name
+
+    Lookup/mapping (replace codes with labels):
+        viz chart data.csv --type pie --x Code --y Value \\
+            --lookup codes.csv --lookup-column Code \\
+            --lookup-code-col code --lookup-label-col label
+
+    Filtering (keep only specific values):
+        viz chart data.csv --type bar --x category --y value \\
+            --filter "Country:BG,DE,DK" --filter "Year:2020"
+
+    Excluding row values (remove rows with specific values):
+        viz chart data.csv --type pie --x category --y value \\
+            --exclude "category:Total,Unknown"
+
+    Dropping columns (ignore entire columns):
+        viz chart data.csv --type bar --x category --y value \\
+            --drop-columns "Total,Subtotal"
+
+    Faceted charts (dropdown selector):
+        viz chart data.csv --type pie --x category --y value \\
+            --facet Country -o chart.html
     """
     with console.status("[bold green]Loading data..."):
         df = load_data(file)
@@ -128,6 +173,45 @@ def chart(
                 variable_name=var_name,
                 value_name=value_name,
             )
+    if lookup is not None:
+        if not all([lookup_column, lookup_code_col, lookup_label_col]):
+            raise typer.BadParameter(
+                "When using --lookup, you must also provide --lookup-column, "
+                "--lookup-code-col, and --lookup-label-col"
+            )
+        with console.status("[bold cyan]Applying lookup..."):
+            lookup_df = load_data(lookup)
+            df = apply_lookup(
+                df=df,
+                lookup_df=lookup_df,
+                source_column=lookup_column,
+                code_column=lookup_code_col,
+                label_column=lookup_label_col,
+            )
+    if filter_expr is not None:
+        with console.status("[bold magenta]Filtering data..."):
+            for expr in filter_expr:
+                if ":" not in expr:
+                    raise typer.BadParameter(
+                        f"Invalid filter format: '{expr}'. Use COL:VAL1,VAL2,..."
+                    )
+                col, values_str = expr.split(":", 1)
+                values = [v.strip() for v in values_str.split(",")]
+                df = filter_data(df=df, column=col, values=values)
+    if exclude_expr is not None:
+        with console.status("[bold red]Excluding values..."):
+            for expr in exclude_expr:
+                if ":" not in expr:
+                    raise typer.BadParameter(
+                        f"Invalid exclude format: '{expr}'. Use COL:VAL1,VAL2,..."
+                    )
+                col, values_str = expr.split(":", 1)
+                values = [v.strip() for v in values_str.split(",")]
+                df = exclude_values(df=df, column=col, values=values)
+    if drop_cols is not None:
+        with console.status("[bold yellow]Dropping columns..."):
+            columns_to_drop = [col.strip() for col in drop_cols.split(",")]
+            df = drop_columns(df=df, columns=columns_to_drop)
     output_path = Path(output)
     export_format = _get_export_format(output_path)
     chart_type_enum = ChartType(chart_type.value)
@@ -140,6 +224,7 @@ def chart(
             y=y,
             title=title,
             color=color,
+            facet_column=facet,
         )
         graph_renderer.export(fig, str(output_path), export_format)
     console.print(f"[green]✓[/green] Chart saved to: [bold]{output_path}[/bold]")

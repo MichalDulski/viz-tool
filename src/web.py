@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-from src.engine import compare_datasets, load_data, unpivot_data
+from src.engine import apply_lookup, compare_datasets, drop_columns, exclude_values, filter_data, load_data, unpivot_data
 from src.graphs import ChartType, get_renderer, list_renderers
 
 st.set_page_config(layout="wide", page_title="Data Viz Tool")
@@ -144,7 +144,140 @@ with tab_visualize:
             except Exception as e:
                 st.error(f"Error unpivoting data: {e}")
                 df = df_original
-        columns = list(df.columns)
+        current_columns = list(df.columns)
+        with st.expander("📋 Lookup Mapping (replace codes with labels)", expanded=False):
+            lookup_file = st.file_uploader(
+                "Upload Lookup File",
+                type=["csv", "json"],
+                key="lookup_file",
+                help="CSV/JSON file containing code-to-label mappings",
+            )
+            if lookup_file:
+                try:
+                    lookup_df = load_data(lookup_file)
+                    lookup_columns = list(lookup_df.columns)
+                    st.dataframe(lookup_df.to_pandas().head(5), use_container_width=True)
+                    lookup_col1, lookup_col2, lookup_col3 = st.columns(3)
+                    with lookup_col1:
+                        lookup_source_column = st.selectbox(
+                            "Column to Replace",
+                            options=current_columns,
+                            index=0,
+                            help="Column in main data containing codes to replace",
+                            key="lookup_source",
+                        )
+                    with lookup_col2:
+                        lookup_code_column = st.selectbox(
+                            "Code Column (lookup)",
+                            options=lookup_columns,
+                            index=0,
+                            help="Column in lookup file containing codes",
+                            key="lookup_code",
+                        )
+                    with lookup_col3:
+                        default_label_idx = 1 if len(lookup_columns) > 1 else 0
+                        lookup_label_column = st.selectbox(
+                            "Label Column (lookup)",
+                            options=lookup_columns,
+                            index=default_label_idx,
+                            help="Column in lookup file containing labels",
+                            key="lookup_label",
+                        )
+                    if st.button("Apply Lookup", key="apply_lookup"):
+                        try:
+                            df = apply_lookup(
+                                df=df,
+                                lookup_df=lookup_df,
+                                source_column=lookup_source_column,
+                                code_column=lookup_code_column,
+                                label_column=lookup_label_column,
+                            )
+                            st.session_state["df_with_lookup"] = df
+                            st.success("Lookup applied successfully!")
+                            st.dataframe(df.to_pandas().head(10), use_container_width=True)
+                        except Exception as e:
+                            st.error(f"Error applying lookup: {e}")
+                except Exception as e:
+                    st.error(f"Error loading lookup file: {e}")
+            if "df_with_lookup" in st.session_state:
+                df = st.session_state["df_with_lookup"]
+                current_columns = list(df.columns)
+        with st.expander("🔍 Filter Data (keep values)", expanded=False):
+            filter_column = st.selectbox(
+                "Filter Column",
+                options=current_columns,
+                index=0,
+                key="filter_column",
+                help="Select column to filter on",
+            )
+            unique_values = df[filter_column].unique().to_list()
+            unique_values_str = [str(v) for v in unique_values]
+            filter_values = st.multiselect(
+                "Values to Keep",
+                options=unique_values_str,
+                default=[],
+                help="Select values to keep (leave empty to keep all)",
+                key="filter_values",
+            )
+            if st.button("Apply Filter", key="apply_filter") and filter_values:
+                try:
+                    df = filter_data(df=df, column=filter_column, values=filter_values)
+                    st.session_state["df_filtered"] = df
+                    st.success(f"Filtered to {len(df)} rows")
+                    st.dataframe(df.to_pandas().head(10), use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error filtering data: {e}")
+            if "df_filtered" in st.session_state:
+                df = st.session_state["df_filtered"]
+                current_columns = list(df.columns)
+        with st.expander("🚫 Exclude Row Values", expanded=False):
+            exclude_column = st.selectbox(
+                "Exclude Column",
+                options=current_columns,
+                index=0,
+                key="exclude_column",
+                help="Select column to exclude values from",
+            )
+            exclude_unique_values = df[exclude_column].unique().to_list()
+            exclude_unique_values_str = [str(v) for v in exclude_unique_values]
+            exclude_values_selected = st.multiselect(
+                "Values to Exclude",
+                options=exclude_unique_values_str,
+                default=[],
+                help="Select row values to remove (e.g., 'Total', 'Unknown')",
+                key="exclude_values",
+            )
+            if st.button("Apply Exclusion", key="apply_exclude") and exclude_values_selected:
+                try:
+                    df = exclude_values(df=df, column=exclude_column, values=exclude_values_selected)
+                    st.session_state["df_excluded"] = df
+                    st.success(f"Excluded values, {len(df)} rows remaining")
+                    st.dataframe(df.to_pandas().head(10), use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error excluding values: {e}")
+            if "df_excluded" in st.session_state:
+                df = st.session_state["df_excluded"]
+                current_columns = list(df.columns)
+        with st.expander("🗑️ Drop Columns (ignore columns)", expanded=False):
+            columns_to_drop = st.multiselect(
+                "Columns to Drop",
+                options=current_columns,
+                default=[],
+                help="Select columns to ignore/remove from the data (e.g., 'Total', 'Subtotal')",
+                key="drop_columns",
+            )
+            if st.button("Drop Columns", key="apply_drop") and columns_to_drop:
+                try:
+                    df = drop_columns(df=df, columns=columns_to_drop)
+                    st.session_state["df_dropped"] = df
+                    st.success(f"Dropped {len(columns_to_drop)} column(s)")
+                    st.dataframe(df.to_pandas().head(10), use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error dropping columns: {e}")
+            if "df_dropped" in st.session_state:
+                df = st.session_state["df_dropped"]
+                current_columns = list(df.columns)
+        columns = current_columns
         col1, col2, col3 = st.columns(3)
         with col1:
             chart_type_str = st.selectbox(
@@ -170,6 +303,12 @@ with tab_visualize:
             )
         with col5:
             chart_title = st.text_input("Chart Title (optional)", value="")
+        facet_column = st.selectbox(
+            "Facet By (dropdown selector)",
+            options=["None"] + list(columns),
+            index=0,
+            help="Create interactive dropdown to switch between groups",
+        )
         if st.button("Generate Chart", type="primary"):
             try:
                 renderer = get_renderer(selected_renderer)
@@ -181,6 +320,7 @@ with tab_visualize:
                     y=y_column,
                     title=chart_title if chart_title else None,
                     color=color_column if color_column != "None" else None,
+                    facet_column=facet_column if facet_column != "None" else None,
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 html_content = renderer.to_html(fig)

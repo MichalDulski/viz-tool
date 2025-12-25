@@ -93,6 +93,10 @@ Core data processing module using Polars.
 - `load_data(filepath: str) -> pl.DataFrame` - Auto-detects file format (CSV, JSON, Parquet) and loads into a Polars DataFrame
 - `compare_datasets(df_a: pl.DataFrame, df_b: pl.DataFrame, join_key: str) -> pl.DataFrame` - Performs outer join on two datasets and calculates difference columns for all numeric fields
 - `unpivot_data(df, id_columns, value_columns_start, value_columns_end, variable_name, value_name) -> pl.DataFrame` - Transforms wide-format data to long format (melt/unpivot operation)
+- `apply_lookup(df, lookup_df, source_column, code_column, label_column) -> pl.DataFrame` - Replaces codes with labels using a lookup table
+- `filter_data(df, column, values) -> pl.DataFrame` - Filters rows where column value is in the given set (keep only)
+- `exclude_values(df, column, values) -> pl.DataFrame` - Excludes rows where column value is in the given set (remove)
+- `drop_columns(df, columns) -> pl.DataFrame` - Drops specified columns from the DataFrame
 
 **unpivot_data Modes:**
 
@@ -119,11 +123,15 @@ Export and rendering infrastructure with pluggable backends. This layer is respo
 **GraphRenderer Protocol Methods:**
 
 ```python
-def create_chart(df, chart_type, x, y, title, color, **kwargs) -> FigureResult
+def create_chart(df, chart_type, x, y, title, color, facet_column, **kwargs) -> FigureResult
 def create_network(df, source, target, weight, title, layout, **kwargs) -> FigureResult
 def export(figure, filepath, export_format) -> None
 def to_html(figure) -> str
 ```
+
+**Faceted Charts:**
+
+When `facet_column` is provided, `create_chart` generates an interactive chart with a dropdown menu to switch between facet values. This is useful for comparing the same chart across different groups (e.g., countries, years).
 
 ### src/cli.py
 
@@ -150,6 +158,31 @@ The `chart` command supports on-the-fly unpivoting for wide-format data:
 
 Use either `--id-cols` OR `--value-start` (mutually exclusive modes).
 
+**Chart Command - Lookup Options:**
+
+| Option               | Description                            |
+| -------------------- | -------------------------------------- |
+| `--lookup`           | Path to lookup/mapping CSV file        |
+| `--lookup-column`    | Column in main data to apply lookup to |
+| `--lookup-code-col`  | Code column name in lookup file        |
+| `--lookup-label-col` | Label column name in lookup file       |
+
+**Chart Command - Filter Options:**
+
+| Option           | Description                                                     |
+| ---------------- | --------------------------------------------------------------- |
+| `--filter`       | Filter expression as `COL:VAL1,VAL2,...` (keep only these rows) |
+| `--exclude`      | Exclude expression as `COL:VAL1,VAL2,...` (remove these rows)   |
+| `--drop-columns` | Comma-separated column names to ignore/drop entirely            |
+
+`--filter` and `--exclude` can be used multiple times for different columns.
+
+**Chart Command - Facet Options:**
+
+| Option    | Description                                       |
+| --------- | ------------------------------------------------- |
+| `--facet` | Column for creating interactive dropdown selector |
+
 ### src/web.py
 
 Streamlit-based web GUI running on port 8501.
@@ -168,6 +201,42 @@ Enable "Unpivot wide-format data" checkbox to transform columns into rows before
 
 - Specify identifier columns (multi-select)
 - Specify value column start index (with optional custom end)
+
+**Visualize Tab - Lookup Mapping:**
+
+Expand the "Lookup Mapping" section to replace codes with labels from a second file:
+
+- Upload a lookup CSV file with code-to-label mappings
+- Select the column to replace in main data
+- Select the code and label columns in the lookup file
+- Click "Apply Lookup" to transform
+
+**Visualize Tab - Filter Data:**
+
+Expand the "Filter Data (keep values)" section to keep only specific values:
+
+- Select a column to filter on
+- Choose values to keep (multi-select)
+- Click "Apply Filter" to filter
+
+**Visualize Tab - Exclude Row Values:**
+
+Expand the "Exclude Row Values" section to remove rows with specific values:
+
+- Select a column to filter on
+- Choose row values to remove (multi-select)
+- Click "Apply Exclusion" to remove matching rows
+
+**Visualize Tab - Drop Columns:**
+
+Expand the "Drop Columns" section to ignore entire columns:
+
+- Select columns to drop (e.g., "Total", "Subtotal")
+- Click "Drop Columns" to remove them from the data
+
+**Visualize Tab - Faceted Charts:**
+
+Select a "Facet By" column to create an interactive chart with a dropdown selector to switch between groups (e.g., different countries or years).
 
 ## Running the Application
 
@@ -206,6 +275,37 @@ podman compose run --rm cli chart data/demography.csv --type line \
   --var-name Year --value-name Population \
   --x Year --y Population --color "Country Name" \
   -o data/population.html
+
+# Apply lookup mapping (replace codes with labels)
+podman compose run --rm cli chart data/expenditure.csv --type pie \
+  --lookup data/codes.csv --lookup-column "Expenditure Code" \
+  --lookup-code-col code --lookup-label-col label \
+  --x "Expenditure Code" --y "OBS value" \
+  -o data/spending.html
+
+# Filter data by specific values (keep only these)
+podman compose run --rm cli chart data/expenditure.csv --type bar \
+  --filter "Country:BG,DE,DK" --filter "Year:2020" \
+  --x "Expenditure Code" --y "OBS value" \
+  -o data/filtered.html
+
+# Exclude specific row values (remove rows where Category is "Total")
+podman compose run --rm cli chart data/expenditure.csv --type pie \
+  --exclude "Expenditure Code:Total,Unknown" \
+  --x "Expenditure Code" --y "OBS value" \
+  -o data/no_total.html
+
+# Drop entire columns (ignore "Total" column from the data)
+podman compose run --rm cli chart data/expenditure.csv --type bar \
+  --drop-columns "Total,Subtotal" \
+  --x "Expenditure Code" --y "OBS value" \
+  -o data/no_total_column.html
+
+# Create faceted chart with dropdown selector
+podman compose run --rm cli chart data/expenditure.csv --type pie \
+  --filter "Year:2020" --facet Country \
+  --x "Expenditure Code" --y "OBS value" \
+  -o data/by_country.html
 ```
 
 ### GUI Mode
