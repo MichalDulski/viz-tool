@@ -192,6 +192,15 @@ with tab_visualize:
                                 code_column=lookup_code_column,
                                 label_column=lookup_label_column,
                             )
+                            # Store the lookup mapping for filter display
+                            lookup_mapping = dict(zip(
+                                lookup_df[lookup_code_column].to_list(),
+                                lookup_df[lookup_label_column].to_list()
+                            ))
+                            if "lookup_mappings" not in st.session_state:
+                                st.session_state["lookup_mappings"] = {}
+                            st.session_state["lookup_mappings"][lookup_source_column] = lookup_mapping
+
                             st.session_state["df_with_lookup"] = df
                             st.success("Lookup applied successfully!")
                             st.dataframe(df.to_pandas().head(10), use_container_width=True)
@@ -212,16 +221,35 @@ with tab_visualize:
             )
             unique_values = df[filter_column].unique().to_list()
             unique_values_str = [str(v) for v in unique_values]
+
+            # Check if this column has a lookup mapping
+            lookup_mappings = st.session_state.get("lookup_mappings", {})
+            if filter_column in lookup_mappings:
+                # Create display options showing both code and label
+                reverse_mapping = {v: k for k, v in lookup_mappings[filter_column].items()}
+                display_options = []
+                for value in unique_values_str:
+                    original_code = reverse_mapping.get(value, value)
+                    display_options.append(f"{original_code} - {value}")
+                filter_display_options = display_options
+                # Create mapping from display option back to actual value
+                display_to_value = dict(zip(display_options, unique_values_str))
+            else:
+                filter_display_options = unique_values_str
+                display_to_value = dict(zip(unique_values_str, unique_values_str))
+
             filter_values = st.multiselect(
                 "Values to Keep",
-                options=unique_values_str,
+                options=filter_display_options,
                 default=[],
-                help="Select values to keep (leave empty to keep all)",
+                help="Select values to keep (leave empty to keep all). Shows 'Code - Label' for lookup columns.",
                 key="filter_values",
             )
-            if st.button("Apply Filter", key="apply_filter") and filter_values:
+            # Convert display options back to actual values for filtering
+            actual_filter_values = [display_to_value[opt] for opt in filter_values]
+            if st.button("Apply Filter", key="apply_filter") and actual_filter_values:
                 try:
-                    df = filter_data(df=df, column=filter_column, values=filter_values)
+                    df = filter_data(df=df, column=filter_column, values=actual_filter_values)
                     st.session_state["df_filtered"] = df
                     st.success(f"Filtered to {len(df)} rows")
                     st.dataframe(df.to_pandas().head(10), use_container_width=True)
@@ -240,16 +268,33 @@ with tab_visualize:
             )
             exclude_unique_values = df[exclude_column].unique().to_list()
             exclude_unique_values_str = [str(v) for v in exclude_unique_values]
+
+            # Check if this column has a lookup mapping
+            lookup_mappings = st.session_state.get("lookup_mappings", {})
+            if exclude_column in lookup_mappings:
+                # Create display options showing both code and label
+                reverse_mapping = {v: k for k, v in lookup_mappings[exclude_column].items()}
+                exclude_display_options = []
+                for value in exclude_unique_values_str:
+                    original_code = reverse_mapping.get(value, value)
+                    exclude_display_options.append(f"{original_code} - {value}")
+                exclude_display_to_value = dict(zip(exclude_display_options, exclude_unique_values_str))
+            else:
+                exclude_display_options = exclude_unique_values_str
+                exclude_display_to_value = dict(zip(exclude_unique_values_str, exclude_unique_values_str))
+
             exclude_values_selected = st.multiselect(
                 "Values to Exclude",
-                options=exclude_unique_values_str,
+                options=exclude_display_options,
                 default=[],
-                help="Select row values to remove (e.g., 'Total', 'Unknown')",
+                help="Select row values to remove (e.g., 'Total', 'Unknown'). Shows 'Code - Label' for lookup columns.",
                 key="exclude_values",
             )
-            if st.button("Apply Exclusion", key="apply_exclude") and exclude_values_selected:
+            # Convert display options back to actual values for exclusion
+            actual_exclude_values = [exclude_display_to_value[opt] for opt in exclude_values_selected]
+            if st.button("Apply Exclusion", key="apply_exclude") and actual_exclude_values:
                 try:
-                    df = exclude_values(df=df, column=exclude_column, values=exclude_values_selected)
+                    df = exclude_values(df=df, column=exclude_column, values=actual_exclude_values)
                     st.session_state["df_excluded"] = df
                     st.success(f"Excluded values, {len(df)} rows remaining")
                     st.dataframe(df.to_pandas().head(10), use_container_width=True)
@@ -303,11 +348,11 @@ with tab_visualize:
             )
         with col5:
             chart_title = st.text_input("Chart Title (optional)", value="")
-        facet_column = st.selectbox(
+        facet_columns = st.multiselect(
             "Facet By (dropdown selector)",
-            options=["None"] + list(columns),
-            index=0,
-            help="Create interactive dropdown to switch between groups",
+            options=columns,
+            default=[],
+            help="Select one or more columns for combined dropdown (e.g., Country | Year)",
         )
         if st.button("Generate Chart", type="primary"):
             try:
@@ -320,9 +365,9 @@ with tab_visualize:
                     y=y_column,
                     title=chart_title if chart_title else None,
                     color=color_column if color_column != "None" else None,
-                    facet_column=facet_column if facet_column != "None" else None,
+                    facet_columns=facet_columns if facet_columns else None,
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, height=600)
                 html_content = renderer.to_html(fig)
                 st.download_button(
                     label="Download as HTML",
@@ -392,7 +437,7 @@ with tab_network:
                     title=network_title if network_title else None,
                     layout=layout_option,
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, height=600)
                 html_content = renderer.to_html(fig)
                 st.download_button(
                     label="Download as HTML",

@@ -24,7 +24,7 @@ class GraphRenderer(Protocol):
         *,
         title: str | None = None,
         color: str | None = None,
-        facet_column: str | None = None,
+        facet_columns: list[str] | None = None,
         **kwargs: object,
     ) -> FigureResult:
         """
@@ -37,9 +37,9 @@ class GraphRenderer(Protocol):
             y: Column name(s) for y-axis.
             title: Optional chart title.
             color: Optional column name for color grouping.
-            facet_column: Optional column for creating interactive dropdown
-                selector. When provided, generates a chart with a dropdown
-                menu to switch between facet values.
+            facet_columns: Optional list of columns for creating interactive
+                dropdown selector. When provided, generates a chart with a
+                dropdown menu. Multiple columns are combined as "Val1 | Val2".
             **kwargs: Additional renderer-specific options.
 
         Returns:

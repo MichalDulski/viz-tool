@@ -123,7 +123,7 @@ Export and rendering infrastructure with pluggable backends. This layer is respo
 **GraphRenderer Protocol Methods:**
 
 ```python
-def create_chart(df, chart_type, x, y, title, color, facet_column, **kwargs) -> FigureResult
+def create_chart(df, chart_type, x, y, title, color, facet_columns, **kwargs) -> FigureResult
 def create_network(df, source, target, weight, title, layout, **kwargs) -> FigureResult
 def export(figure, filepath, export_format) -> None
 def to_html(figure) -> str
@@ -131,7 +131,7 @@ def to_html(figure) -> str
 
 **Faceted Charts:**
 
-When `facet_column` is provided, `create_chart` generates an interactive chart with a dropdown menu to switch between facet values. This is useful for comparing the same chart across different groups (e.g., countries, years).
+When `facet_columns` is provided, `create_chart` generates an interactive chart with a dropdown menu to switch between facet values. Multiple facet columns are combined as "Value1 | Value2" in the dropdown. This is useful for comparing the same chart across different groups (e.g., countries, years, or both).
 
 ### src/cli.py
 
@@ -179,9 +179,11 @@ Use either `--id-cols` OR `--value-start` (mutually exclusive modes).
 
 **Chart Command - Facet Options:**
 
-| Option    | Description                                       |
-| --------- | ------------------------------------------------- |
-| `--facet` | Column for creating interactive dropdown selector |
+| Option     | Description                                                                     |
+| ---------- | ------------------------------------------------------------------------------- |
+| `--facets` | Column(s) for dropdown selector (repeatable or comma-separated for multi-facet) |
+
+Multiple facet columns are combined as "Value1 | Value2" in the dropdown.
 
 ### src/web.py
 
@@ -236,7 +238,7 @@ Expand the "Drop Columns" section to ignore entire columns:
 
 **Visualize Tab - Faceted Charts:**
 
-Select a "Facet By" column to create an interactive chart with a dropdown selector to switch between groups (e.g., different countries or years).
+Select one or more "Facet By" columns to create an interactive chart with a dropdown selector. Multiple facet columns are combined as "Value1 | Value2" in the dropdown (e.g., "USA | 2020").
 
 ## Running the Application
 
@@ -301,11 +303,23 @@ podman compose run --rm cli chart data/expenditure.csv --type bar \
   --x "Expenditure Code" --y "OBS value" \
   -o data/no_total_column.html
 
-# Create faceted chart with dropdown selector
+# Create faceted chart with dropdown selector (single facet)
 podman compose run --rm cli chart data/expenditure.csv --type pie \
-  --filter "Year:2020" --facet Country \
+  --filter "Year:2020" --facets Country \
   --x "Expenditure Code" --y "OBS value" \
   -o data/by_country.html
+
+# Create multi-facet chart with combined dropdown (Country | Year)
+podman compose run --rm cli chart data/expenditure.csv --type pie \
+  --facets Country --facets Year \
+  --x "Expenditure Code" --y "OBS value" \
+  -o data/by_country_year.html
+
+# Or use comma-separated facets
+podman compose run --rm cli chart data/expenditure.csv --type pie \
+  --facets "Country,Year" \
+  --x "Expenditure Code" --y "OBS value" \
+  -o data/by_country_year.html
 ```
 
 ### GUI Mode

@@ -25,7 +25,7 @@ class PlotlyRenderer:
         *,
         title: str | None = None,
         color: str | None = None,
-        facet_column: str | None = None,
+        facet_columns: list[str] | None = None,
         **kwargs: object,
     ) -> FigureResult:
         """
@@ -38,17 +38,17 @@ class PlotlyRenderer:
             y: Column name(s) for y-axis.
             title: Optional chart title.
             color: Optional column name for color grouping.
-            facet_column: Optional column for creating interactive dropdown
-                selector to switch between facet values.
+            facet_columns: Optional list of columns for creating interactive
+                dropdown selector. Multiple columns are combined as "Val1 | Val2".
             **kwargs: Additional Plotly-specific options.
 
         Returns:
             A Plotly Figure object.
         """
         pandas_df = df.to_pandas()
-        if facet_column is not None:
+        if facet_columns is not None and len(facet_columns) > 0:
             return self._create_faceted_chart(
-                pandas_df, chart_type, x, y, title, color, facet_column, **kwargs
+                pandas_df, chart_type, x, y, title, color, facet_columns, **kwargs
             )
         chart_builders = {
             ChartType.BAR: self._create_bar,
@@ -132,32 +132,59 @@ class PlotlyRenderer:
         y: str | list[str],
         title: str | None,
         color: str | None,
-        facet_column: str,
+        facet_columns: list[str],
         **kwargs: object,
     ) -> go.Figure:
         """
         Create an interactive chart with dropdown selector for facet values.
 
-        Generates separate traces for each unique value in facet_column and
-        adds a dropdown menu to switch between them.
+        Generates separate traces for each unique combination of facet column
+        values and adds a dropdown menu to switch between them. Multiple facet
+        columns are combined as "Val1 | Val2 | ...".
         """
         import pandas as pd
         pandas_df = df if isinstance(df, pd.DataFrame) else df
-        facet_values = sorted(pandas_df[facet_column].unique().tolist())
+        facet_label = " | ".join(facet_columns)
+        if len(facet_columns) == 1:
+            pandas_df = pandas_df.copy()
+            pandas_df["_facet_combined"] = pandas_df[facet_columns[0]].astype(str)
+        else:
+            pandas_df = pandas_df.copy()
+            pandas_df["_facet_combined"] = pandas_df[facet_columns].apply(
+                lambda row: " | ".join(str(v) for v in row), axis=1
+            )
+        facet_values = sorted(pandas_df["_facet_combined"].unique().tolist())
         if len(facet_values) == 0:
-            raise ValueError(f"No values found in facet column '{facet_column}'")
+            raise ValueError(f"No values found in facet columns '{facet_label}'")
         fig = go.Figure()
         y_col = y[0] if isinstance(y, list) else y
-        for idx, facet_value in enumerate(facet_values):
-            facet_df = pandas_df[pandas_df[facet_column] == facet_value]
-            is_visible = idx == 0
-            self._add_facet_traces(
-                fig, facet_df, chart_type, x, y_col, color, facet_value, is_visible
+
+        # Handle pie charts differently - create a single pie chart that gets updated
+        if chart_type == ChartType.PIE:
+            # Start with the first facet
+            first_facet_df = pandas_df[pandas_df["_facet_combined"] == facet_values[0]]
+            fig.add_trace(go.Pie(
+                labels=first_facet_df[x].tolist(),
+                values=first_facet_df[y_col].tolist(),
+                name=str(facet_values[0]),
+            ))
+        else:
+            # For other chart types, create multiple traces with visibility toggle
+            for idx, facet_value in enumerate(facet_values):
+                facet_df = pandas_df[pandas_df["_facet_combined"] == facet_value]
+                is_visible = idx == 0
+                self._add_facet_traces(
+                    fig, facet_df, chart_type, x, y_col, color, facet_value, is_visible
+                )
+        if chart_type == ChartType.PIE:
+            dropdown_buttons = self._create_pie_dropdown_buttons(
+                pandas_df, facet_values, facet_label, x, y_col
             )
-        dropdown_buttons = self._create_dropdown_buttons(
-            pandas_df, facet_values, facet_column, chart_type, color
-        )
-        chart_title = title or f"Chart by {facet_column}"
+        else:
+            dropdown_buttons = self._create_dropdown_buttons(
+                pandas_df, facet_values, facet_label, chart_type, color
+            )
+        chart_title = title or f"Chart by {facet_label}"
         fig.update_layout(
             title=f"{chart_title}: {facet_values[0]}",
             updatemenus=[{
@@ -289,6 +316,34 @@ class PlotlyRenderer:
                 "args": [
                     {"visible": visibility},
                     {"title": f"Chart by {facet_column}: {facet_value}"}
+                ],
+            })
+        return buttons
+
+    def _create_pie_dropdown_buttons(
+        self,
+        df: object,
+        facet_values: list[str],
+        facet_label: str,
+        x: str,
+        y: str,
+    ) -> list[dict]:
+        """Create dropdown button definitions for pie chart facet selector."""
+        import pandas as pd
+        pandas_df = df if isinstance(df, pd.DataFrame) else df
+        buttons = []
+        for facet_value in facet_values:
+            facet_df = pandas_df[pandas_df["_facet_combined"] == facet_value]
+            buttons.append({
+                "label": str(facet_value),
+                "method": "update",
+                "args": [
+                    {
+                        "labels": [facet_df[x].tolist()],
+                        "values": [facet_df[y].tolist()],
+                        "name": [str(facet_value)],
+                    },
+                    {"title": f"Chart by {facet_label}: {facet_value}"}
                 ],
             })
         return buttons

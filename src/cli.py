@@ -116,8 +116,8 @@ def chart(
     drop_cols: str = typer.Option(
         None, "--drop-columns", help="Comma-separated column names to ignore/drop"
     ),
-    facet: str = typer.Option(
-        None, "--facet", help="Column for creating dropdown selector"
+    facets: list[str] = typer.Option(
+        None, "--facets", help="Column(s) for dropdown selector (repeatable, or comma-separated)"
     ),
 ) -> None:
     """
@@ -155,7 +155,14 @@ def chart(
 
     Faceted charts (dropdown selector):
         viz chart data.csv --type pie --x category --y value \\
-            --facet Country -o chart.html
+            --facets Country -o chart.html
+
+    Multi-facet charts (combined dropdown):
+        viz chart data.csv --type pie --x category --y value \\
+            --facets Country --facets Year -o chart.html
+        # Or comma-separated:
+        viz chart data.csv --type pie --x category --y value \\
+            --facets "Country,Year" -o chart.html
     """
     with console.status("[bold green]Loading data..."):
         df = load_data(file)
@@ -212,6 +219,11 @@ def chart(
         with console.status("[bold yellow]Dropping columns..."):
             columns_to_drop = [col.strip() for col in drop_cols.split(",")]
             df = drop_columns(df=df, columns=columns_to_drop)
+    facet_columns = None
+    if facets is not None:
+        facet_columns = []
+        for facet_item in facets:
+            facet_columns.extend([col.strip() for col in facet_item.split(",")])
     output_path = Path(output)
     export_format = _get_export_format(output_path)
     chart_type_enum = ChartType(chart_type.value)
@@ -224,7 +236,7 @@ def chart(
             y=y,
             title=title,
             color=color,
-            facet_column=facet,
+            facet_columns=facet_columns,
         )
         graph_renderer.export(fig, str(output_path), export_format)
     console.print(f"[green]✓[/green] Chart saved to: [bold]{output_path}[/bold]")
